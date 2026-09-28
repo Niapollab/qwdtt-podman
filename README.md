@@ -8,7 +8,8 @@ Production-ready Podman & Quadlet container deployment for the **WDTT VPN Server
 
 - **`Dockerfile`**: Builds the Ubuntu 24.04-based container image with `iptables`, `iproute2`, and dependencies.
 - **`entrypoint.sh`**: Handles certificate & token generation, sets up iptables NAT/masquerade and MSS clamping for both WireGuard (`10.66.0.0/16`) and RAW (`10.70.0.0/16`) subnets, and launches the server.
-- **`qwdtt.container`**: Systemd Quadlet unit file for rootful container execution.
+- **`qwdtt.container`**: Systemd Quadlet unit file for rootless service user container execution.
+- **`create_service_user.sh`**: Helper script to create the dedicated system service user with lingering and subuid/subgid mapping.
 - **`.env`**: Template configuration file containing default ports, secrets, and optional parameters.
 - **`server`**: Precompiled WDTT server binary (obtained by unpacking the client Android APK from `assets/server`).
 
@@ -26,10 +27,19 @@ Production-ready Podman & Quadlet container deployment for the **WDTT VPN Server
 
 ---
 
-## 🚀 Quick Start Deployment
+## 🚀 Rootless Service User Deployment
 
-### 1. Obtain the Server Binary
-The `server` binary is embedded directly inside the Android client APK (downloadable from [GitHub Releases](https://github.com/SpaceNeuroX/proxy-turn-vk-android/releases/)). If updating or setting up from scratch:
+This repository uses a dedicated system service user (`qwdtt`) running Podman in user space with systemd lingering and Quadlet.
+
+### 1. Create the Service User
+A helper script [create_service_user.sh](./create_service_user.sh) is provided to configure the system service user with non-overlapping subuid/subgid ranges and linger mode:
+
+```bash
+./create_service_user.sh qwdtt
+```
+
+### 2. Obtain the Server Binary
+The `server` binary is embedded directly inside the Android client APK (downloadable from [GitHub Releases](https://github.com/SpaceNeuroX/proxy-turn-vk-android/releases/)).
 ```bash
 # Unzip/extract the APK and copy the server binary to this directory:
 unzip -p qwdtt.apk assets/server > ./server
@@ -37,19 +47,20 @@ chmod +x ./server
 ```
 *(Or copy from the extracted repository root: `cp ../assets/server ./server`)*
 
-### 2. Build the Container Image
-From this directory:
+### 3. Build the Container Image
+Build the image as the `qwdtt` user:
 ```bash
-podman build -t localhost/qwdtt:latest .
+sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" podman build -t localhost/qwdtt:latest $(pwd)
 ```
 
-### 3. Configure Environment
-Copy `.env` to the system location `/etc/default/qwdtt` and set a strong master password:
+### 4. Configure Environment
+Copy `.env` to `/var/lib/qwdtt/config` and set secure permissions:
 ```bash
-sudo cp .env /etc/default/qwdtt
-sudo chmod 0600 /etc/default/qwdtt
+sudo cp .env /var/lib/qwdtt/config
+sudo chown qwdtt:qwdtt /var/lib/qwdtt/config
+sudo chmod 0600 /var/lib/qwdtt/config
 ```
-Edit `/etc/default/qwdtt` to uncomment and set `WDTT_MAIN_PASSWORD`:
+Edit `/var/lib/qwdtt/config` to uncomment and set `WDTT_MAIN_PASSWORD`:
 ```ini
 # REQUIRED: Uncomment and set your master password
 WDTT_MAIN_PASSWORD=your_super_secret_password
@@ -61,28 +72,31 @@ WDTT_DNS_SERVERS=1.1.1.1,1.0.0.1
 # WDTT_ADMIN_ID=987654321
 ```
 
-### 4. Install the Quadlet Service
-Copy `qwdtt.container` to the systemd Quadlet directory:
+### 5. Install the User Quadlet Unit
+Place `qwdtt.container` into the user Quadlet directory `/var/lib/qwdtt/.config/containers/systemd/`:
 ```bash
-sudo cp qwdtt.container /etc/containers/systemd/
+sudo mkdir -p /var/lib/qwdtt/.config/containers/systemd/
+sudo cp qwdtt.container /var/lib/qwdtt/.config/containers/systemd/
+sudo chown -R qwdtt:qwdtt /var/lib/qwdtt/.config
 ```
 
-### 5. Enable Host IP Forwarding (Kernel)
+### 6. Enable Host IP Forwarding (Kernel)
 VPN tunneling requires packet forwarding on the host machine:
 ```bash
 echo "net.ipv4.ip_forward=1" | sudo tee /etc/sysctl.d/99-ipforward.conf
 sudo sysctl --system
 ```
 
-### 6. Start the Service
+### 7. Start the Service
+Reload the user systemd daemon and start `qwdtt.service`:
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now qwdtt.service
+sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" systemctl --user daemon-reload
+sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" systemctl --user enable --now qwdtt.service
 ```
 
 Check the status:
 ```bash
-sudo systemctl status qwdtt.service
+sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" systemctl --user status qwdtt.service
 ```
 
 ---
@@ -120,7 +134,7 @@ On initial startup, `qwdtt` generates an admin TLS certificate and an admin toke
 
 View them via journal logs:
 ```bash
-sudo journalctl -u qwdtt.service -n 50 --no-pager
+sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" journalctl --user -u qwdtt.service -n 50 --no-pager
 ```
 Look for:
 ```text
@@ -132,18 +146,22 @@ Admin token: ...
 
 ## ⚙️ Maintenance & Updates
 
+- **Interactive bash shell as `qwdtt`:**
+  ```bash
+  sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" /bin/bash
+  ```
 - **Restarting the service:**
   ```bash
-  sudo systemctl restart qwdtt.service
+  sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" systemctl --user restart qwdtt.service
   ```
 - **Viewing live logs:**
   ```bash
-  sudo journalctl -u qwdtt.service -f
+  sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" journalctl --user -u qwdtt.service -f
   ```
 - **Updating configuration:**
-  Edit `/etc/default/qwdtt`, then run `sudo systemctl restart qwdtt.service`.
+  Edit `/var/lib/qwdtt/config`, then restart the user service.
 - **Rebuilding after script edits:**
   ```bash
-  podman build -t localhost/qwdtt:latest .
-  sudo systemctl restart qwdtt.service
+  sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" podman build -t localhost/qwdtt:latest $(pwd)
+  sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" systemctl --user restart qwdtt.service
   ```
