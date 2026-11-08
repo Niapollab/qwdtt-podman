@@ -20,10 +20,14 @@ create_podman_service_user() {
     echo "[*] Enabling systemd lingering"
     sudo loginctl enable-linger "$NEW_USER"
 
-    echo "[*] Initializing user bus and enabling Podman socket"
+    echo "[*] Initializing user bus and systemd manager"
     local uid
     uid=$(id -u "$NEW_USER")
 
+    # Explicitly start the user's systemd manager instance (required for non-login nologin shells)
+    sudo systemctl start "user@$uid.service"
+
+    # Enable and start the Podman socket for the user
     sudo runuser -u "$NEW_USER" -- env XDG_RUNTIME_DIR="/run/user/$uid" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" systemctl --user enable --now podman.socket
 
     echo "[*] Success! Service user '$NEW_USER' is ready."
