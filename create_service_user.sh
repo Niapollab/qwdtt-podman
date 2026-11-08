@@ -2,7 +2,7 @@
 set -euo pipefail
 
 create_podman_service_user() {
-    local NEW_USER="$1"
+    local NEW_USER="${1:-}"
 
     if [ -z "$NEW_USER" ]; then
         echo "[!] Username cannot be empty." >&2
