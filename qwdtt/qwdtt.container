@@ -1,5 +1,5 @@
 [Unit]
-Description=WDTT VPN Server Container
+Description=QWDTT VPN Server Container
 After=network-online.target
 Wants=network-online.target
 
@@ -20,13 +20,13 @@ Sysctl=net.ipv4.ip_forward=1
 Volume=qwdtt-cfg:/etc/qwdtt:Z
 
 # Read environment variables (ports, password, DNS, tokens)
-EnvironmentFile=/var/lib/qwdtt/config
+EnvironmentFile=%h/.config/qwdtt/config
 
 # Dynamic port publishing via PodmanArgs using environment variables
 PodmanArgs=--publish ${WDTT_DTLS_PORT}:${WDTT_DTLS_PORT}/udp --publish ${WDTT_DTLS_PORT}:${WDTT_DTLS_PORT}/tcp --publish ${WDTT_WG_PORT}:${WDTT_WG_PORT}/udp --publish 127.0.0.1:${WDTT_ADMIN_PORT}:${WDTT_ADMIN_PORT}/tcp --publish ${WDTT_DIRECT_PORT}:${WDTT_DIRECT_PORT}/udp --publish ${WDTT_DIRECT_PORT}:${WDTT_DIRECT_PORT}/tcp --publish ${WDTT_RAW_PORT}:${WDTT_RAW_PORT}/udp
 
 [Service]
-EnvironmentFile=/var/lib/qwdtt/config
+EnvironmentFile=%h/.config/qwdtt/config
 Restart=always
 TimeoutStartSec=60
 

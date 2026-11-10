@@ -1,0 +1,31 @@
+# ==============================================================================
+# CSQTT VPN Server Environment Configuration (v2.5.0-legacy)
+# Location: /var/lib/csqtt/.config/csqtt/config (or referenced by Quadlet)
+# ==============================================================================
+
+# REQUIRED: Master password for CSQTT clients (must be uncommented and set; cannot be empty)
+# CSQTT_MAIN_PASSWORD=your_secure_password_here
+
+# Port configurations
+CSQTT_PEER_PORT=46000
+CSQTT_WEB_PORT=46002
+
+# DNS Configuration (one or two IPv4 addresses separated by a comma)
+CSQTT_DNS=1.1.1.1,1.0.0.1
+
+# Web Panel Credentials & Security
+CSQTT_WEB_USER=admin
+
+# If CSQTT_WEB_PASS is left empty/commented, a random password will be generated
+# and persisted in /etc/csqtt/web.password on first startup (check journalctl logs).
+# CSQTT_WEB_PASS=your_web_panel_password_here
+
+# Optional parameters:
+# External IPv4 address of the server for client links (auto-detected if empty)
+# CSQTT_PUBLIC_IP=
+
+# Secret path prefix for the Web Panel (e.g. my-secret-panel)
+# CSQTT_WEB_SECRET_PATH=
+
+# Issue session cookies over HTTPS only (true/false)
+# CSQTT_SECURE_COOKIE=false

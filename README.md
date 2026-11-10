@@ -1,21 +1,31 @@
-# QWDTT Container Deployment
+# QWDTT & CSQTT Container Deployment
 
-Production-ready Podman & Quadlet container deployment for the **WDTT VPN Server**.
+Production-ready Podman & Quadlet container deployment for **QWDTT** and **CSQTT** (`v2.5.0-legacy`) VPN servers.
 
 ---
 
-## 📁 Directory Overview
+## 📁 Repository Structure
 
-- **`Dockerfile`**: Builds the Ubuntu 24.04-based container image with `iptables`, `iproute2`, and dependencies.
-- **`entrypoint.sh`**: Handles certificate & token generation, sets up iptables NAT/masquerade and MSS clamping for both WireGuard (`10.66.0.0/16`) and RAW (`10.70.0.0/16`) subnets, and launches the server.
-- **`qwdtt.container`**: Systemd Quadlet unit file for rootless service user container execution.
-- **`create_service_user.sh`**: Helper script to create the dedicated system service user with lingering and subuid/subgid mapping.
-- **`.env`**: Template configuration file containing default ports, secrets, and optional parameters.
-- **`server`**: Precompiled WDTT server binary (obtained by unpacking the client Android APK from `assets/server`).
+```text
+.
+├── create_service_user.sh   # Helper script to create dedicated rootless Podman service users
+├── qwdtt/                   # QWDTT VPN Server container files
+│   ├── Containerfile
+│   ├── config
+│   ├── entrypoint.sh
+│   └── qwdtt.container
+└── csqtt/                   # CSQTT VPN Server (v2.5.0-legacy) container files
+    ├── Containerfile
+    ├── config
+    ├── entrypoint.sh
+    └── csqtt.container
+```
 
 ---
 
 ## 🔌 Port Mapping
+
+### QWDTT (`qwdtt/`)
 
 | Port | Protocol | Scope | Description |
 | :--- | :--- | :--- | :--- |
@@ -25,143 +35,180 @@ Production-ready Podman & Quadlet container deployment for the **WDTT VPN Server
 | **56003** | UDP | Public | RAW listen port (`WDTT_RAW_PORT`) |
 | **56004** | TCP | **127.0.0.1** (Localhost only) | HTTPS Admin API (`WDTT_ADMIN_PORT`) |
 
+### CSQTT (`csqtt/`)
+
+| Port | Protocol | Scope | Description |
+| :--- | :--- | :--- | :--- |
+| **46000** | UDP | Public | RTP AEAD / Peer listen port (`CSQTT_PEER_PORT`) |
+| **46002** | TCP | **127.0.0.1** (Localhost only) | HTTPS Web Panel (`CSQTT_WEB_PORT`) |
+
 ---
 
 ## 🚀 Rootless Service User Deployment
 
-This repository uses a dedicated system service user (`qwdtt`) running Podman in user space with systemd lingering and Quadlet.
+Each server runs under its own dedicated system service user (`qwdtt` and/or `csqtt`) using rootless Podman with systemd lingering and Quadlet.
 
-### 1. Create the Service User
-A helper script [create_service_user.sh](./create_service_user.sh) is provided to configure the system service user with non-overlapping subuid/subgid ranges and linger mode:
-
-```bash
-./create_service_user.sh qwdtt
-```
-
-### 2. Obtain the Server Binary
-The `server` binary is embedded directly inside the Android client APK (downloadable from [GitHub Releases](https://github.com/SpaceNeuroX/proxy-turn-vk-android/releases/)).
-```bash
-# Unzip/extract the APK and copy the server binary to this directory:
-unzip -p qwdtt.apk assets/server > ./server
-chmod +x ./server
-```
-*(Or copy from the extracted repository root: `cp ../assets/server ./server`)*
-
-### 3. Build the Container Image
-Build the image as the `qwdtt` user:
-```bash
-sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" podman build -t localhost/qwdtt:latest $(pwd)
-```
-
-### 4. Configure Environment
-Copy `.env` to `/var/lib/qwdtt/config` and set secure permissions:
-```bash
-sudo cp .env /var/lib/qwdtt/config
-sudo chown qwdtt:qwdtt /var/lib/qwdtt/config
-sudo chmod 0600 /var/lib/qwdtt/config
-```
-Edit `/var/lib/qwdtt/config` to uncomment and set `WDTT_MAIN_PASSWORD`:
-```ini
-# REQUIRED: Uncomment and set your master password
-WDTT_MAIN_PASSWORD=your_super_secret_password
-
-WDTT_DNS_SERVERS=1.1.1.1,1.0.0.1
-
-# Optional Telegram management bot:
-# WDTT_BOT_TOKEN=123456789:ABC...
-# WDTT_ADMIN_ID=987654321
-```
-
-### 5. Install the User Quadlet Unit
-Place `qwdtt.container` into the user Quadlet directory `/var/lib/qwdtt/.config/containers/systemd/`:
-```bash
-sudo mkdir -p /var/lib/qwdtt/.config/containers/systemd/
-sudo cp qwdtt.container /var/lib/qwdtt/.config/containers/systemd/
-sudo chown -R qwdtt:qwdtt /var/lib/qwdtt/.config
-```
-
-### 6. Enable Host IP Forwarding (Kernel)
+### 1. Enable Host IP Forwarding (Kernel)
 VPN tunneling requires packet forwarding on the host machine:
 ```bash
 echo "net.ipv4.ip_forward=1" | sudo tee /etc/sysctl.d/99-ipforward.conf
 sudo sysctl --system
 ```
 
-### 7. Start the Service
-Reload the user systemd daemon and start `qwdtt.service`:
+---
+
+### Option A: Deploying QWDTT
+
+#### 1. Create the `qwdtt` Service User
 ```bash
+./create_service_user.sh qwdtt
+```
+
+#### 2. Obtain the QWDTT Server Binary
+Extract `assets/server` from the QWDTT Android client APK ([GitHub Releases](https://github.com/SpaceNeuroX/proxy-turn-vk-android/releases/)) into `./qwdtt/server`:
+```bash
+unzip -p qwdtt.apk assets/server > ./qwdtt/server
+chmod +x ./qwdtt/server
+```
+
+#### 3. Build the QWDTT Container Image
+```bash
+sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" podman build -t localhost/qwdtt:latest $(pwd)/qwdtt
+```
+
+#### 4. Configure QWDTT Environment
+```bash
+sudo mkdir -p /var/lib/qwdtt/.config/qwdtt
+sudo cp ./qwdtt/config /var/lib/qwdtt/.config/qwdtt/config
+sudo chown -R qwdtt:qwdtt /var/lib/qwdtt/.config
+sudo chmod 0600 /var/lib/qwdtt/.config/qwdtt/config
+```
+Edit `/var/lib/qwdtt/.config/qwdtt/config` and set `WDTT_MAIN_PASSWORD`.
+
+#### 5. Install and Start the QWDTT Quadlet Unit
+```bash
+sudo mkdir -p /var/lib/qwdtt/.config/containers/systemd/
+sudo cp ./qwdtt/qwdtt.container /var/lib/qwdtt/.config/containers/systemd/
+sudo chown -R qwdtt:qwdtt /var/lib/qwdtt/.config
+
 sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" systemctl --user daemon-reload
 sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" systemctl --user enable --now qwdtt.service
 ```
 
-Check the status:
+---
+
+### Option B: Deploying CSQTT (`v2.5.0-legacy`)
+
+#### 1. Create the `csqtt` Service User
 ```bash
-sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" systemctl --user status qwdtt.service
+./create_service_user.sh csqtt
+```
+
+#### 2. Obtain the CSQTT Server Binary
+Extract `assets/csqtt-linux-amd64` (or `assets/csqtt-linux-arm64` / `assets/csqtt-linux-armv7`) from the CSQTT Android client APK ([MRTT v2.5.0-legacy Releases](https://github.com/ttrroyy/MRTT/releases/tag/v2.5.0-legacy)) into `./csqtt/server`:
+```bash
+unzip -p CSQTT-arm64-v8a.apk assets/csqtt-linux-amd64 > ./csqtt/server
+chmod +x ./csqtt/server
+```
+
+#### 3. Build the CSQTT Container Image
+```bash
+sudo runuser -u csqtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u csqtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u csqtt)/bus" podman build -t localhost/csqtt:latest $(pwd)/csqtt
+```
+
+#### 4. Configure CSQTT Environment
+```bash
+sudo mkdir -p /var/lib/csqtt/.config/csqtt
+sudo cp ./csqtt/config /var/lib/csqtt/.config/csqtt/config
+sudo chown -R csqtt:csqtt /var/lib/csqtt/.config
+sudo chmod 0600 /var/lib/csqtt/.config/csqtt/config
+```
+Edit `/var/lib/csqtt/.config/csqtt/config` and set `CSQTT_MAIN_PASSWORD` (and optionally `CSQTT_WEB_PASS` and `CSQTT_PUBLIC_IP`).
+
+#### 5. Install and Start the CSQTT Quadlet Unit
+```bash
+sudo mkdir -p /var/lib/csqtt/.config/containers/systemd/
+sudo cp ./csqtt/csqtt.container /var/lib/csqtt/.config/containers/systemd/
+sudo chown -R csqtt:csqtt /var/lib/csqtt/.config
+
+sudo runuser -u csqtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u csqtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u csqtt)/bus" systemctl --user daemon-reload
+sudo runuser -u csqtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u csqtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u csqtt)/bus" systemctl --user enable --now csqtt.service
 ```
 
 ---
 
 ## 🛡️ Host Firewall Configuration (iptables)
 
-If your host has default policies set to `DROP` (`-P INPUT DROP` and `-P FORWARD DROP`), run the following commands to create dedicated chains:
+If your host has default policies set to `DROP` (`-P INPUT DROP` and `-P FORWARD DROP`), run the following commands for the deployed services:
 
+### For QWDTT
 ```bash
-# 1. Create chains
 sudo iptables -N INPUT_QWDTT
 sudo iptables -N FORWARD_QWDTT
 
-# 2. Allow inbound VPN client traffic
 sudo iptables -A INPUT_QWDTT -p udp -m multiport --dports 56000,56001,56002,56003 -j ACCEPT
 sudo iptables -A INPUT_QWDTT -p tcp -m multiport --dports 56000,56002 -j ACCEPT
 
-# 3. Allow incoming connections forwarded from outside network (ens3) to container ports on podman0
 sudo iptables -A FORWARD_QWDTT -i ens3 -o podman0 -p udp -m multiport --dports 56000,56001,56002,56003 -j ACCEPT
 sudo iptables -A FORWARD_QWDTT -i ens3 -o podman0 -p tcp -m multiport --dports 56000,56002 -j ACCEPT
 
-# 4. Attach chains to INPUT and FORWARD
 sudo iptables -I INPUT 3 -j INPUT_QWDTT
 sudo iptables -A FORWARD -j FORWARD_QWDTT
 ```
+
+### For CSQTT
+```bash
+sudo iptables -N INPUT_CSQTT
+sudo iptables -N FORWARD_CSQTT
+
+sudo iptables -A INPUT_CSQTT -p udp --dport 46000 -j ACCEPT
+sudo iptables -A FORWARD_CSQTT -i ens3 -o podman0 -p udp --dport 46000 -j ACCEPT
+
+sudo iptables -I INPUT 3 -j INPUT_CSQTT
+sudo iptables -A FORWARD -j FORWARD_CSQTT
+```
 > [!NOTE]
-> Outbound internet traffic (`podman0 -> ens3`) and return established connections (`ens3 -> podman0`) are already handled by Podman's built-in `NETAVARK_FORWARD` chain. `FORWARD_QWDTT` only needs to accept new incoming client connections to the published ports.
+> Outbound internet traffic (`podman0 -> ens3`) and return established connections (`ens3 -> podman0`) are already handled by Podman's built-in `NETAVARK_FORWARD` chain.
 > *(Adjust `ens3` if your WAN interface name differs).*
 
 ---
 
-## 🔑 Retrieving Admin PIN & Token
+## 🔑 Retrieving Credentials & TLS Pins
 
-On initial startup, `qwdtt` generates an admin TLS certificate and an admin token inside persistent volume `qwdtt-cfg`.
-
-View them via journal logs:
+### QWDTT Admin PIN & Token
 ```bash
 sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" journalctl --user -u qwdtt.service -n 50 --no-pager
 ```
-Look for:
-```text
-WDTT_ADMIN_PIN|sha256/...
-Admin token: ...
+Look for `WDTT_ADMIN_PIN|sha256/...` and `Admin token: ...`.
+
+### CSQTT Web Panel Credentials & TLS Pin
+```bash
+sudo runuser -u csqtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u csqtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u csqtt)/bus" journalctl --user -u csqtt.service -n 50 --no-pager
 ```
+Look for `CSQTT_WEB_CERT_PIN|sha256/...`, `Web panel user: ...`, and `Web panel password: ...`.
 
 ---
 
 ## ⚙️ Maintenance & Updates
 
-- **Interactive bash shell as `qwdtt`:**
+Replace `<service>` with `qwdtt` or `csqtt`:
+
+- **Interactive bash shell as `<service>`:**
   ```bash
-  sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" /bin/bash
+  sudo runuser -u <service> -- env XDG_RUNTIME_DIR="/run/user/$(id -u <service>)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u <service>)/bus" /bin/bash
   ```
 - **Restarting the service:**
   ```bash
-  sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" systemctl --user restart qwdtt.service
+  sudo runuser -u <service> -- env XDG_RUNTIME_DIR="/run/user/$(id -u <service>)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u <service>)/bus" systemctl --user restart <service>.service
   ```
 - **Viewing live logs:**
   ```bash
-  sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" journalctl --user -u qwdtt.service -f
+  sudo runuser -u <service> -- env XDG_RUNTIME_DIR="/run/user/$(id -u <service>)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u <service>)/bus" journalctl --user -u <service>.service -f
   ```
 - **Updating configuration:**
-  Edit `/var/lib/qwdtt/config`, then restart the user service.
-- **Rebuilding after script edits:**
+  Edit `/var/lib/<service>/.config/<service>/config`, then restart the user service.
+- **Rebuilding after script or binary updates:**
   ```bash
-  sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" podman build -t localhost/qwdtt:latest $(pwd)
-  sudo runuser -u qwdtt -- env XDG_RUNTIME_DIR="/run/user/$(id -u qwdtt)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u qwdtt)/bus" systemctl --user restart qwdtt.service
+  sudo runuser -u <service> -- env XDG_RUNTIME_DIR="/run/user/$(id -u <service>)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u <service>)/bus" podman build -t localhost/<service>:latest $(pwd)/<service>
+  sudo runuser -u <service> -- env XDG_RUNTIME_DIR="/run/user/$(id -u <service>)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u <service>)/bus" systemctl --user restart <service>.service
   ```

@@ -1,13 +1,18 @@
-# Binaries
+# Binaries & APKs
 server
-server
+csqtt-linux-*
 *.apk
 
 # Environment and sensitive data
 *.key
 *.crt
+*.pem
 *.token
 *.password
+*.db
+*.db-wal
+*.db-shm
+deploy-overrides.json
 
 # OS & Editor files
 .DS_Store

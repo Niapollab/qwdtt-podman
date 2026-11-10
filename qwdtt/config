@@ -1,9 +1,9 @@
 # ==============================================================================
-# WDTT VPN Server Environment Configuration
-# Location: /var/lib/qwdtt/config (or referenced by Quadlet)
+# QWDTT VPN Server Environment Configuration
+# Location: /var/lib/qwdtt/.config/qwdtt/config (or referenced by Quadlet)
 # ==============================================================================
 
-# REQUIRED: Master password for WDTT (must be uncommented and set; cannot be empty)
+# REQUIRED: Master password for QWDTT (must be uncommented and set; cannot be empty)
 # WDTT_MAIN_PASSWORD=your_secure_password_here
 
 # Port configurations
